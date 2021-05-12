@@ -137,10 +137,6 @@ COPY toCOPY/lst_utils.sh /usr/local/bin
 COPY toCOPY/.inputrc /home/$MYUNAME/
 COPY toCOPY/builder-constraints.txt /home/$MYUNAME/
 
-# Thes are included for backward compatibility, and
-# should be removed after a reasonable time.
-COPY toCOPY/generate-cgcs-tis-repo /usr/local/bin
-COPY toCOPY/generate-cgcs-centos-repo.sh /usr/local/bin
 
 # cpan modules, installing with cpanminus to avoid stupid questions since cpan is whack
 RUN cpanm --notest Fatal && \
@@ -164,17 +160,35 @@ RUN dnf install -y golang && \
     mkdir -p ${GOPATH}/bin && \
     curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
 
-# mock time
-# forcing chroots since a couple of packages naughtily insist on network access and
-# we dont have nspawn and networks happy together.
-RUN useradd -s /sbin/nologin -u 9001 -g 9001 mockbuild && \
-    rmdir /var/lib/mock && \
-    ln -s /localdisk/loadbuild/mock /var/lib/mock && \
-    rmdir /var/cache/mock && \
-    ln -s /localdisk/loadbuild/mock-cache /var/cache/mock && \
-    echo "config_opts['use_nspawn'] = False" >> /etc/mock/site-defaults.cfg && \
-    echo "config_opts['rpmbuild_networking'] = True" >> /etc/mock/site-defaults.cfg && \
-    echo  >> /etc/mock/site-defaults.cfg
+# Uprev git, repo
+RUN yum install -y dh-autoreconf curl-devel expat-devel gettext-devel  openssl-devel perl-devel zlib-devel asciidoc xmlto docbook2X && \
+    cd /tmp && \
+    wget https://github.com/git/git/archive/v2.29.2.tar.gz -O git-2.29.2.tar.gz && \
+    tar xzvf git-2.29.2.tar.gz && \
+    cd git-2.29.2 && \
+    make configure && \
+    ./configure --prefix=/usr/local && \
+    make all doc && \
+    make install install-doc && \
+    cd /tmp && \
+    rm -rf git-2.29.2.tar.gz git-2.29.2
+
+# Systemd Enablement
+RUN (cd /lib/systemd/system/sysinit.target.wants/; for i in *; do [ $i == systemd-tmpfiles-setup.service ] || rm -f $i; done); \
+    rm -f /lib/systemd/system/multi-user.target.wants/*;\
+    rm -f /etc/systemd/system/*.wants/*;\
+    rm -f /lib/systemd/system/local-fs.target.wants/*; \
+    rm -f /lib/systemd/system/sockets.target.wants/*udev*; \
+    rm -f /lib/systemd/system/sockets.target.wants/*initctl*; \
+    rm -f /lib/systemd/system/basic.target.wants/*;\
+    rm -f /lib/systemd/system/anaconda.target.wants/*
+
+# pip installs
+COPY toCOPY/builder-constraints.txt /home/$MYUNAME/
+RUN pip install -c /home/$MYUNAME/builder-constraints.txt pbr==5.6.0 --upgrade && \
+    pip install -c /home/$MYUNAME/builder-constraints.txt git-review==2.1.0 --upgrade && \
+    pip install -c /home/$MYUNAME/builder-constraints.txt python-subunit==1.4.0 junitxml==0.7 --upgrade && \
+    pip install -c /home/$MYUNAME/builder-constraints.txt tox==3.23.0 --upgrade
 
 # Inherited  tools for mock stuff
 # we at least need the mock_cache_unlock tool
@@ -183,6 +197,21 @@ COPY toCOPY/mock_overlay /opt/mock_overlay
 RUN cd /opt/mock_overlay && \
     make && \
     make install
+
+# This image requires a set of scripts and helpers
+# for working correctly, in this section they are
+# copied inside the image.
+COPY toCOPY/finishSetup.sh /usr/local/bin
+COPY toCOPY/populate_downloads.sh /usr/local/bin
+COPY toCOPY/generate-local-repo.sh /usr/local/bin
+COPY toCOPY/generate-centos-repo.sh /usr/local/bin
+COPY toCOPY/lst_utils.sh /usr/local/bin
+COPY toCOPY/.inputrc /home/$MYUNAME/
+
+# Thes are included for backward compatibility, and
+# should be removed after a reasonable time.
+COPY toCOPY/generate-cgcs-tis-repo /usr/local/bin
+COPY toCOPY/generate-cgcs-centos-repo.sh /usr/local/bin
 
 #  ENV setup
 RUN echo "# Load stx-builder configuration" >> /etc/profile.d/stx-builder-conf.sh && \
